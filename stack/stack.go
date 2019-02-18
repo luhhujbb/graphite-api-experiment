@@ -20,7 +20,7 @@ func (s *Stack) Push(value interface{}) {
 	s.size++
 }
 
-// Remove the top element from the stack and return it
+// Pop removes the top element from the stack and return it
 func (s *Stack) Pop() (value interface{}) {
 	if s.size > 0 {
 		value, s.top = s.top.value, s.top.next
