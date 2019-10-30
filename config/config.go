@@ -16,7 +16,7 @@ type storeElasticsearchInfo struct {
 }
 
 type storeInfluxdbInfo struct {
-	Host     string
+	Addr     string
 	Username string
 	Password string
 	Database string

@@ -6,23 +6,23 @@ import (
 	"github.com/graphite-ng/graphite-ng/config"
 	"github.com/graphite-ng/graphite-ng/metrics"
 	"github.com/graphite-ng/graphite-ng/util"
-	influxdb "github.com/influxdb/influxdb/client"
+	influxdb "github.com/influxdata/influxdb1-client/v2"
 )
 
 type InfluxdbStore struct {
-	client *influxdb.Client
+	client influxdb.Client
+	Database string
 }
 
 func NewInfluxStore(config config.Main) Store {
-	c := influxdb.ClientConfig{
-		Host:     config.StoreInflux.Host,
+	c := influxdb.HTTPConfig{
+		Addr:     config.StoreInflux.Addr,
 		Username: config.StoreInflux.Username,
 		Password: config.StoreInflux.Password,
-		Database: config.StoreInflux.Database,
 	}
-	client, err := influxdb.NewClient(&c)
+	client, err := influxdb.NewHTTPClient(c)
 	util.DieIfError(err)
-	return InfluxdbStore{client}
+	return InfluxdbStore{client,config.StoreInflux.Database}
 }
 
 func init() {
@@ -39,17 +39,18 @@ func (i InfluxdbStore) Get(name string) (our_el *chains.ChainEl, err error) {
 	go func(our_el *chains.ChainEl) {
 		from := <-our_el.Settings
 		until := <-our_el.Settings
-
-		query := fmt.Sprintf("select time, value from %s where time > %ds and time < %ds order asc", name, from, until)
-		series, err := i.client.Query(query)
-		if err != nil {
+		queryString := fmt.Sprintf("select time, value from %s where time > %ds and time < %ds order asc", name, from, until)
+		query := influxdb.NewQuery(queryString,i.Database,"")
+		response, err := i.client.Query(query)
+		if err != nil || response.Error() != nil {
 			panic(err)
 		}
 		// len(series) can be 0 if there's no datapoints matching the range.
 		// so it's up to the caller to make sure the store is supposed to have the data
 		// if we don't have enough data to cover the requested timespan, fill with nils
-		if len(series) > 0 {
-			points := series[0].Points
+		if len(response.Results) > 0 {
+			series := response.Results[0].Series
+			points := series[0].Values
 			oldest_dp := int32(points[0][0].(float64) / 1000)
 			latest_dp := int32(points[len(points)-1][0].(float64) / 1000)
 			if oldest_dp > from {
@@ -78,23 +79,26 @@ func (i InfluxdbStore) Get(name string) (our_el *chains.ChainEl, err error) {
 }
 
 func (i InfluxdbStore) Has(name string) (found bool, err error) {
-	series, err := i.client.Query("select time from " + name + " limit 1;")
+	query := influxdb.NewQuery("select time from " + name + " limit 1;",i.Database,"")
+	response, err := i.client.Query(query)
 	if err != nil {
 		panic(err)
 	}
-	if len(series) > 0 {
+	if len(response.Results[0].Series) > 0 {
 		found = true
 	}
 	return
 }
 func (i InfluxdbStore) List() (list []string, err error) {
-	series, err := i.client.Query("list series")
+	query := influxdb.NewQuery("list series",i.Database,"")
+	response, err := i.client.Query(query)
 	if err != nil {
 		return
 	}
-	list = make([]string, len(series))
-	for i, s := range series {
-		list[i] = s.Name
+	series := response.Results[0].Series;
+	list = make([]string, len(series[0].Values))
+	for i, s := range series[0].Values {
+		list[i] = s[0].(string)
 	}
 	return
 }
